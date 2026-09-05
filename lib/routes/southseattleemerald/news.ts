@@ -3,11 +3,21 @@ import * as cheerio from 'cheerio';
 import { type Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 
+const baseUrl = 'https://southseattleemerald.org';
+
+const sections = {
+    latest: { path: '/collection/latest-stories', title: 'Latest Stories' },
+    news: { path: '/news', title: 'News' },
+    community: { path: '/community', title: 'Community' },
+    voices: { path: '/voices', title: 'Voices' },
+    'arts-culture': { path: '/arts-culture', title: 'Arts & Culture' },
+};
+
 export const route: Route = {
-    path: '/news',
+    path: '/:section?',
     categories: ['new-media'],
-    example: '/southseattleemerald/news',
-    parameters: {},
+    example: '/southseattleemerald/latest',
+    parameters: { section: 'Section, defaults to `latest`. Options: ' + Object.keys(sections).join(', ') },
     features: {
         requireConfig: false,
         requirePuppeteer: false,
@@ -16,49 +26,41 @@ export const route: Route = {
         supportPodcast: false,
         supportScihub: false,
     },
-    radar: [
-        {
-            source: ['southseattleemerald.org/news'],
-            target: '/news',
-        },
-    ],
-    name: 'Latest News',
-    maintainers: ['yourname'],
+    radar: [{ source: ['southseattleemerald.org/:section'], target: '/:section' }],
+    name: 'Sections',
+    maintainers: ['abirck'],
     handler,
 };
 
-const baseUrl = 'https://southseattleemerald.org';
+async function handler(ctx) {
+    const key = ctx.req.param('section') ?? 'latest';
+    const section = sections[key] ?? sections.latest;
 
-async function handler() {
-    const response = await ofetch(`${baseUrl}/news`);
+    const response = await ofetch(`${baseUrl}${section.path}`);
     const $ = cheerio.load(response);
 
     const items = $('[data-test-id="story-card"]')
         .toArray()
         .map((el) => {
             const $card = $(el);
-
             const $headline = $card.find('[data-test-id="headline"] a');
-            const title = $headline.find('h3').text().trim();
-            const link = $headline.attr('href');
-
-            const author = $card.find('[data-test-id="author-name"]').text().trim();
-
+            const href = $headline.attr('href');
+            const link = href ? new URL(href, baseUrl).href : undefined;
             const pubDateRaw = $card.find('time.arr__timeago').attr('datetime');
-            const pubDate = pubDateRaw ? new Date(pubDateRaw) : undefined;
 
             return {
-                title,
+                title: $headline.find('h3').text().trim(),
                 link,
-                author,
-                pubDate,
+                author: $card.find('[data-test-id="author-name"]').text().trim(),
+                pubDate: pubDateRaw ? new Date(pubDateRaw) : undefined,
+                category: link ? [new URL(link).pathname.split('/', 2)[1]] : [],
             };
         })
         .filter((item) => item.title && item.link);
 
     return {
-        title: 'South Seattle Emerald — News',
-        link: `${baseUrl}/news`,
+        title: `South Seattle Emerald — ${section.title}`,
+        link: `${baseUrl}${section.path}`,
         item: items,
     };
 }
